@@ -1,9 +1,12 @@
+" vint: -ProhibitUnusedVariable
+let s:debounce_timer_id = 0
+
 function! s:not_supported(what) abort
     return lsp#utils#error(a:what.' not supported for '.&filetype)
 endfunction
 
 function! lsp#ui#vim#signature_help#get_signature_help_under_cursor() abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_signature_help_provider(v:val)')
+    let l:servers = filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_signature_help_provider(v:val)')
 
     if len(l:servers) == 0
         call s:not_supported('Retrieving signature help')
@@ -11,19 +14,18 @@ function! lsp#ui#vim#signature_help#get_signature_help_under_cursor() abort
     endif
 
     let l:position = lsp#get_position()
-    let l:position.character += 1
     for l:server in l:servers
         call lsp#send_request(l:server, {
             \ 'method': 'textDocument/signatureHelp',
             \ 'params': {
             \   'textDocument': lsp#get_text_document_identifier(),
-            \   'position': position,
+            \   'position': l:position,
             \ },
             \ 'on_notification': function('s:handle_signature_help', [l:server]),
             \ })
     endfor
 
-    echo 'Retrieving signature help ...'
+    call lsp#log('Retrieving signature help')
     return
 endfunction
 
@@ -110,21 +112,49 @@ function! s:get_parameter_doc(parameter) abort
     return printf('***%s*** - %s', a:parameter['label'], l:doc)
 endfunction
 
-function! s:insert_char_pre() abort
-    let l:buf = bufnr('%')
-    for l:server_name in lsp#get_whitelisted_servers(l:buf)
-        let l:keys = lsp#capabilities#get_signature_help_trigger_characters(l:server_name)
-        for l:key in l:keys
-            if l:key ==# v:char
-                call timer_start(0, {_-> lsp#ui#vim#signature_help#get_signature_help_under_cursor() })
-            endif
+function! s:on_cursor_moved() abort
+    let l:bufnr = bufnr('%')
+    call timer_stop(s:debounce_timer_id)
+    if g:lsp_signature_help_enabled
+        let s:debounce_timer_id = timer_start(g:lsp_signature_help_delay, function('s:on_text_changed_after', [l:bufnr]), { 'repeat': 1 })
+    endif
+endfunction
+
+function! s:on_text_changed_after(bufnr, timer) abort
+    if bufnr('%') != a:bufnr
+        return
+    endif
+    if index(['i', 's'], mode()[0]) == -1
+        return
+    endif
+    if win_id2win(lsp#ui#vim#output#getpreviewwinid()) >= 1
+        return
+    endif
+
+    " Cache trigger chars since this loop is heavy
+    let l:chars = get(b:, 'lsp_signature_help_trigger_character', [])
+    if empty(l:chars)
+        for l:server_name in lsp#get_allowed_servers(a:bufnr)
+            let l:chars += lsp#capabilities#get_signature_help_trigger_characters(l:server_name)
         endfor
-    endfor
+        let b:lsp_signature_help_trigger_character = l:chars
+    endif
+
+    if index(l:chars, lsp#utils#_get_before_char_skip_white()) >= 0
+        call lsp#ui#vim#signature_help#get_signature_help_under_cursor()
+    endif
 endfunction
 
 function! lsp#ui#vim#signature_help#setup() abort
     augroup _lsp_signature_help_
         autocmd!
-        autocmd InsertCharPre <buffer> call s:insert_char_pre()
+        autocmd CursorMoved,CursorMovedI * call s:on_cursor_moved()
     augroup END
 endfunction
+
+function! lsp#ui#vim#signature_help#_disable() abort
+    augroup _lsp_signature_help_
+        autocmd!
+    augroup END
+endfunction
+

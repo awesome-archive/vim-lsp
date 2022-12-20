@@ -2,7 +2,7 @@ let s:folding_ranges = {}
 let s:textprop_name = 'vim-lsp-folding-linenr'
 
 function! s:find_servers() abort
-    return filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_folding_range_provider(v:val)')
+    return filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_folding_range_provider(v:val)')
 endfunction
 
 function! lsp#ui#vim#folding#fold(sync) abort
@@ -28,17 +28,27 @@ function! s:set_textprops(buf) abort
     if !bufloaded(a:buf) | return | endif
 
     " Create text property, if not already defined
-    silent! call prop_type_add(s:textprop_name, {'bufnr': a:buf})
+    silent! call prop_type_add(s:textprop_name, {'bufnr': a:buf, 'priority': lsp#internal#textprop#priority('folding')})
+
+    let l:line_count = s:get_line_count_buf(a:buf)
 
     " First, clear all markers from the previous run
-    call prop_remove({'type': s:textprop_name, 'bufnr': a:buf}, 1, line('$'))
+    call prop_remove({'type': s:textprop_name, 'bufnr': a:buf}, 1, l:line_count)
 
     " Add markers to each line
     let l:i = 1
-    while l:i <= line('$')
+    while l:i <= l:line_count
         call prop_add(l:i, 1, {'bufnr': a:buf, 'type': s:textprop_name, 'id': l:i})
         let l:i += 1
     endwhile
+endfunction
+
+function! s:get_line_count_buf(buf) abort
+    if !has('patch-8.1.1967')
+        return line('$')
+    endif
+    let l:winids = win_findbuf(a:buf)
+    return empty(l:winids) ? line('$') : line('$', l:winids[0])
 endfunction
 
 function! lsp#ui#vim#folding#send_request(server_name, buf, sync) abort
@@ -61,7 +71,8 @@ function! lsp#ui#vim#folding#send_request(server_name, buf, sync) abort
                 \   'textDocument': lsp#get_text_document_identifier(a:buf)
                 \ },
                 \ 'on_notification': function('s:handle_fold_request', [a:server_name]),
-                \ 'sync': a:sync
+                \ 'sync': a:sync,
+                \ 'bufnr': a:buf
                 \ })
 endfunction
 
@@ -178,15 +189,13 @@ function! s:handle_fold_request(server, data) abort
     endif
     let s:folding_ranges[a:server][l:bufnr] = l:result
 
-    " Don't do the 'windo' in Insert mode, it puts Vim back in Normal mode.
-    if mode()[0] ==# 'i'
-        return
-    endif
-
     " Set 'foldmethod' back to 'expr', which forces a re-evaluation of
     " 'foldexpr'. Only do this if the user hasn't changed 'foldmethod',
     " and this is the correct buffer.
-    let l:current_window = winnr()
-    windo if &l:foldmethod ==# 'expr' && bufnr('%') == l:bufnr | let &l:foldmethod = 'expr' | endif
-    execute l:current_window . 'wincmd w'
+    for l:winid in win_findbuf(l:bufnr)
+        if getwinvar(l:winid, '&foldmethod') ==# 'expr'
+            call setwinvar(l:winid, '&foldmethod', 'expr')
+        endif
+    endfor
 endfunction
+

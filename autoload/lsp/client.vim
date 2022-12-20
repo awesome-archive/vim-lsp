@@ -1,5 +1,5 @@
-let s:save_cpo = &cpo
-set cpo&vim
+let s:save_cpo = &cpoptions
+set cpoptions&vim
 
 let s:clients = {} " { client_id: ctx }
 
@@ -37,11 +37,7 @@ function! s:on_stdout(id, data, event) abort
         return
     endif
 
-    if empty(l:ctx['buffer'])
-        let l:ctx['buffer'] = join(a:data, "\n")
-    else
-        let l:ctx['buffer'] .= join(a:data, "\n")
-    endif
+    let l:ctx['buffer'] .= a:data
 
     while 1
         if l:ctx['content-length'] < 0
@@ -103,7 +99,7 @@ function! s:on_stdout(id, data, event) abort
                     try
                         call l:ctx['opts']['on_notification'](a:id, l:on_notification_data, 'on_notification')
                     catch
-                        call lsp#log('s:on_stdout client option on_notification() error', v:exception)
+                        call lsp#log('s:on_stdout client option on_notification() error', v:exception, v:throwpoint)
                     endtry
                 endif
                 if has_key(l:ctx['on_notifications'], l:response['id'])
@@ -126,7 +122,7 @@ function! s:on_stdout(id, data, event) abort
                     try
                         call l:ctx['opts']['on_notification'](a:id, l:on_notification_data, 'on_notification')
                     catch
-                        call lsp#log('s:on_stdout on_notification() error', v:exception)
+                        call lsp#log('s:on_stdout on_notification() error', v:exception, v:throwpoint)
                     endtry
                 endif
             endif
@@ -160,7 +156,7 @@ function! s:on_stderr(id, data, event) abort
         try
             call l:ctx['opts']['on_stderr'](a:id, a:data, a:event)
         catch
-            call lsp#log('s:on_stderr exception', v:exception)
+            call lsp#log('s:on_stderr exception', v:exception, v:throwpoint)
             echom v:exception
         endtry
     endif
@@ -175,7 +171,7 @@ function! s:on_exit(id, status, event) abort
         try
             call l:ctx['opts']['on_exit'](a:id, a:status, a:event)
         catch
-            call lsp#log('s:on_exit exception', v:exception)
+            call lsp#log('s:on_exit exception', v:exception, v:throwpoint)
             echom v:exception
         endtry
     endif
@@ -183,15 +179,23 @@ function! s:on_exit(id, status, event) abort
 endfunction
 
 function! s:lsp_start(opts) abort
-    if !has_key(a:opts, 'cmd')
-        return -1
-    endif
-
-    let l:client_id = async#job#start(a:opts.cmd, {
+    let l:opts = {
         \ 'on_stdout': function('s:on_stdout'),
         \ 'on_stderr': function('s:on_stderr'),
         \ 'on_exit': function('s:on_exit'),
-        \ })
+        \ 'normalize': 'string'
+        \ }
+    if has_key(a:opts, 'env')
+        let l:opts.env = a:opts.env
+    endif
+
+    if has_key(a:opts, 'cmd')
+        let l:client_id = lsp#utils#job#start(a:opts.cmd, l:opts)
+    elseif has_key(a:opts, 'tcp')
+        let l:client_id = lsp#utils#job#connect(a:opts.tcp, l:opts)
+    else
+        return -1
+    endif
 
     let l:ctx = s:create_context(l:client_id, a:opts)
     let l:ctx['id'] = l:client_id
@@ -200,7 +204,7 @@ function! s:lsp_start(opts) abort
 endfunction
 
 function! s:lsp_stop(id) abort
-    call async#job#stop(a:id)
+    call lsp#utils#job#stop(a:id)
 endfunction
 
 let s:send_type_request = 1
@@ -242,14 +246,15 @@ function! s:lsp_send(id, opts, type) abort " opts = { id?, method?, result?, par
     let l:json = json_encode(l:request)
     let l:payload = 'Content-Length: ' . len(l:json) . "\r\n\r\n" . l:json
 
-    call async#job#send(a:id, l:payload)
+    call lsp#utils#job#send(a:id, l:payload)
 
     if (a:type == s:send_type_request)
         let l:id = l:request['id']
         if get(a:opts, 'sync', 0) !=# 0
-            while has_key(l:ctx['requests'], l:request['id'])
-                sleep 1m
-            endwhile
+            let l:timeout = get(a:opts, 'sync_timeout', -1)
+            if lsp#utils#_wait(l:timeout, {-> !has_key(l:ctx['requests'], l:request['id'])}, 1) == -1
+                throw 'lsp#client: timeout'
+            endif
         endif
         return l:id
     else
@@ -262,10 +267,10 @@ function! s:lsp_get_last_request_id(id) abort
 endfunction
 
 function! s:lsp_is_error(obj_or_response) abort
-    let vt = type(a:obj_or_response)
-    if vt == type('')
+    let l:vt = type(a:obj_or_response)
+    if l:vt == type('')
         return len(a:obj_or_response) > 0
-    elseif vt == type({})
+    elseif l:vt == type({})
         return has_key(a:obj_or_response, 'error')
     endif
     return 0
@@ -324,6 +329,6 @@ endfunction
 
 " }}}
 
-let &cpo = s:save_cpo
+let &cpoptions = s:save_cpo
 unlet s:save_cpo
 " vim sw=4 ts=4 et

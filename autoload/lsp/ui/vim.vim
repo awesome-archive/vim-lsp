@@ -1,132 +1,77 @@
-let s:last_req_id = 0
-
 function! s:not_supported(what) abort
-    return lsp#utils#error(a:what.' not supported for '.&filetype)
+    return lsp#utils#error(printf("%s not supported for filetype '%s'", a:what, &filetype))
 endfunction
 
-function! lsp#ui#vim#implementation(in_preview) abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_implementation_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-    call setqflist([])
-
-    if len(l:servers) == 0
-        call s:not_supported('Retrieving implementation')
-        return
+function! lsp#ui#vim#implementation(in_preview, ...) abort
+    let l:ctx = { 'in_preview': a:in_preview }
+    if a:0
+        let l:ctx['mods'] = a:1
     endif
-    let l:ctx = { 'counter': len(l:servers), 'list':[], 'last_req_id': s:last_req_id, 'jump_if_one': 1, 'in_preview': a:in_preview }
-    for l:server in l:servers
-        call lsp#send_request(l:server, {
-            \ 'method': 'textDocument/implementation',
-            \ 'params': {
-            \   'textDocument': lsp#get_text_document_identifier(),
-            \   'position': lsp#get_position(),
-            \ },
-            \ 'on_notification': function('s:handle_location', [l:ctx, l:server, 'implementation']),
-            \ })
-    endfor
-
-    echo 'Retrieving implementation ...'
+    call s:list_location('implementation', l:ctx)
 endfunction
 
-function! lsp#ui#vim#type_definition(in_preview) abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_type_definition_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-    call setqflist([])
-
-    if len(l:servers) == 0
-        call s:not_supported('Retrieving type definition')
-        return
+function! lsp#ui#vim#type_definition(in_preview, ...) abort
+    let l:ctx = { 'in_preview': a:in_preview }
+    if a:0
+        let l:ctx['mods'] = a:1
     endif
-    let l:ctx = { 'counter': len(l:servers), 'list':[], 'last_req_id': s:last_req_id, 'jump_if_one': 1, 'in_preview': a:in_preview }
-    for l:server in l:servers
-        call lsp#send_request(l:server, {
-            \ 'method': 'textDocument/typeDefinition',
-            \ 'params': {
-            \   'textDocument': lsp#get_text_document_identifier(),
-            \   'position': lsp#get_position(),
-            \ },
-            \ 'on_notification': function('s:handle_location', [l:ctx, l:server, 'type definition']),
-            \ })
-    endfor
-
-    echo 'Retrieving type definition ...'
+    call s:list_location('typeDefinition', l:ctx)
 endfunction
 
-function! lsp#ui#vim#declaration(in_preview) abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_declaration_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-    call setqflist([])
 
-    if len(l:servers) == 0
-        call s:not_supported('Retrieving declaration')
-        return
+function! lsp#ui#vim#declaration(in_preview, ...) abort
+    let l:ctx = { 'in_preview': a:in_preview }
+    if a:0
+        let l:ctx['mods'] = a:1
     endif
-
-    let l:ctx = { 'counter': len(l:servers), 'list':[], 'last_req_id': s:last_req_id, 'jump_if_one': 1, 'in_preview': a:in_preview }
-    for l:server in l:servers
-        call lsp#send_request(l:server, {
-            \ 'method': 'textDocument/declaration',
-            \ 'params': {
-            \   'textDocument': lsp#get_text_document_identifier(),
-            \   'position': lsp#get_position(),
-            \ },
-            \ 'on_notification': function('s:handle_location', [l:ctx, l:server, 'declaration']),
-            \ })
-    endfor
-
-    echo 'Retrieving declaration ...'
+    call s:list_location('declaration', l:ctx)
 endfunction
 
-function! lsp#ui#vim#definition(in_preview) abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_definition_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-    call setqflist([])
-
-    if len(l:servers) == 0
-        call s:not_supported('Retrieving definition')
-        return
+function! lsp#ui#vim#definition(in_preview, ...) abort
+    let l:ctx = { 'in_preview': a:in_preview }
+    if a:0
+        let l:ctx['mods'] = a:1
     endif
-
-    let l:ctx = { 'counter': len(l:servers), 'list':[], 'last_req_id': s:last_req_id, 'jump_if_one': 1, 'in_preview': a:in_preview }
-    for l:server in l:servers
-        call lsp#send_request(l:server, {
-            \ 'method': 'textDocument/definition',
-            \ 'params': {
-            \   'textDocument': lsp#get_text_document_identifier(),
-            \   'position': lsp#get_position(),
-            \ },
-            \ 'on_notification': function('s:handle_location', [l:ctx, l:server, 'definition']),
-            \ })
-    endfor
-
-    echo 'Retrieving definition ...'
+    call s:list_location('definition', l:ctx)
 endfunction
 
 function! lsp#ui#vim#references() abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_references_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
+    let l:ctx = { 'jump_if_one': 0 }
+    let l:request_params = { 'context': { 'includeDeclaration': v:false } }
+    call s:list_location('references', l:ctx, l:request_params)
+endfunction
 
-    call setqflist([])
+function! s:list_location(method, ctx, ...) abort
+    " typeDefinition => type definition
+    let l:operation = substitute(a:method, '\u', ' \l\0', 'g')
 
-    let l:ctx = { 'counter': len(l:servers), 'list':[], 'last_req_id': s:last_req_id, 'jump_if_one': 0, 'in_preview': 0 }
+    let l:capabilities_func = printf('lsp#capabilities#has_%s_provider(v:val)', substitute(l:operation, ' ', '_', 'g'))
+    let l:servers = filter(lsp#get_allowed_servers(), l:capabilities_func)
+    let l:command_id = lsp#_new_command()
+
+
+    let l:ctx = extend({ 'counter': len(l:servers), 'list':[], 'last_command_id': l:command_id, 'jump_if_one': 1, 'mods': '', 'in_preview': 0 }, a:ctx)
     if len(l:servers) == 0
-        call s:not_supported('Retrieving references')
+        call s:not_supported('Retrieving ' . l:operation)
         return
     endif
 
+    let l:params = {
+        \   'textDocument': lsp#get_text_document_identifier(),
+        \   'position': lsp#get_position(),
+        \ }
+    if a:0
+        call extend(l:params, a:1)
+    endif
     for l:server in l:servers
         call lsp#send_request(l:server, {
-            \ 'method': 'textDocument/references',
-            \ 'params': {
-            \   'textDocument': lsp#get_text_document_identifier(),
-            \   'position': lsp#get_position(),
-            \   'context': {'includeDeclaration': v:false},
-            \ },
-            \ 'on_notification': function('s:handle_location', [l:ctx, l:server, 'references']),
+            \ 'method': 'textDocument/' . a:method,
+            \ 'params': l:params,
+            \ 'on_notification': function('s:handle_location', [l:ctx, l:server, l:operation]),
             \ })
     endfor
 
-    echo 'Retrieving references ...'
+    echo printf('Retrieving %s ...', l:operation)
 endfunction
 
 function! s:rename(server, new_name, pos) abort
@@ -143,21 +88,21 @@ function! s:rename(server, new_name, pos) abort
         \   'position': a:pos,
         \   'newName': a:new_name,
         \ },
-        \ 'on_notification': function('s:handle_workspace_edit', [a:server, s:last_req_id, 'rename']),
+        \ 'on_notification': function('s:handle_workspace_edit', [a:server, lsp#_last_command(), 'rename']),
         \ })
 
     echo ' ... Renaming ...'
 endfunction
 
 function! lsp#ui#vim#rename() abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_rename_prepare_provider(v:val)')
+    let l:servers = filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_rename_prepare_provider(v:val)')
     let l:prepare_support = 1
     if len(l:servers) == 0
-        let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_rename_provider(v:val)')
+        let l:servers = filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_rename_provider(v:val)')
         let l:prepare_support = 0
     endif
 
-    let s:last_req_id = s:last_req_id + 1
+    let l:command_id = lsp#_new_command()
 
     if len(l:servers) == 0
         call s:not_supported('Renaming')
@@ -174,7 +119,7 @@ function! lsp#ui#vim#rename() abort
             \   'textDocument': lsp#get_text_document_identifier(),
             \   'position': lsp#get_position(),
             \ },
-            \ 'on_notification': function('s:handle_rename_prepare', [l:server, s:last_req_id, 'rename_prepare']),
+            \ 'on_notification': function('s:handle_rename_prepare', [l:server, l:command_id, 'rename_prepare', expand('<cword>'), lsp#get_position()]),
             \ })
         return
     endif
@@ -182,133 +127,34 @@ function! lsp#ui#vim#rename() abort
     call s:rename(l:server, input('new name: ', expand('<cword>')), lsp#get_position())
 endfunction
 
-function! s:document_format(sync) abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_document_formatting_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-
-    if len(l:servers) == 0
-        call s:not_supported('Document formatting')
-        return
-    endif
-
-    " TODO: ask user to select server for formatting
-    let l:server = l:servers[0]
-    redraw | echo 'Formatting document ...'
-    call lsp#send_request(l:server, {
-        \ 'method': 'textDocument/formatting',
-        \ 'params': {
-        \   'textDocument': lsp#get_text_document_identifier(),
-        \   'options': {
-        \       'tabSize': getbufvar(bufnr('%'), '&tabstop'),
-        \       'insertSpaces': getbufvar(bufnr('%'), '&expandtab') ? v:true : v:false,
-        \   },
-        \ },
-        \ 'sync': a:sync,
-        \ 'on_notification': function('s:handle_text_edit', [l:server, s:last_req_id, 'document format']),
-        \ })
-endfunction
-
-function! lsp#ui#vim#document_format_sync() abort
-    let l:mode = mode()
-    if l:mode =~# '[vV]' || l:mode ==# "\<C-V>"
-        return s:document_format_range(1)
-    endif
-    return s:document_format(1)
-endfunction
-
-function! lsp#ui#vim#document_format() abort
-    let l:mode = mode()
-    if l:mode =~# '[vV]' || l:mode ==# "\<C-V>"
-        return s:document_format_range(0)
-    endif
-    return s:document_format(0)
-endfunction
-
-function! s:get_selection_pos(type) abort
-    if a:type ==? 'v'
-        let l:start_pos = getpos("'<")[1:2]
-        let l:end_pos = getpos("'>")[1:2]
-        " fix end_pos column (see :h getpos() and :h 'selection')
-        let l:end_line = getline(l:end_pos[0])
-        let l:offset = (&selection ==# 'inclusive' ? 1 : 2)
-        let l:end_pos[1] = len(l:end_line[:l:end_pos[1]-l:offset])
-        " edge case: single character selected with selection=exclusive
-        if l:start_pos[0] == l:end_pos[0] && l:start_pos[1] > l:end_pos[1]
-            let l:end_pos[1] = l:start_pos[1]
+function! lsp#ui#vim#stop_server(...) abort
+    let l:name = get(a:000, 0, '')
+    for l:server in lsp#get_allowed_servers()
+        if !empty(l:name) && l:server != l:name
+            continue
         endif
-    elseif a:type ==? 'line'
-        let l:start_pos = [line("'["), 1]
-        let l:end_lnum = line("']")
-        let l:end_pos = [line("']"), len(getline(l:end_lnum))]
-    elseif a:type ==? 'char'
-        let l:start_pos = getpos("'[")[1:2]
-        let l:end_pos = getpos("']")[1:2]
-    else
-        let l:start_pos = [0, 0]
-        let l:end_pos = [0, 0]
-    endif
-
-    return l:start_pos + l:end_pos
+        echo 'Stopping' l:server 'server ...'
+        call lsp#stop_server(l:server)
+    endfor
 endfunction
 
-function! s:document_format_range(sync, type) abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_document_range_formatting_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-
-    if len(l:servers) == 0
-        call s:not_supported('Document range formatting')
-        return
-    endif
-
-    " TODO: ask user to select server for formatting
-    let l:server = l:servers[0]
-
-    let [l:start_lnum, l:start_col, l:end_lnum, l:end_col] = s:get_selection_pos(a:type)
-    let l:start_char = lsp#utils#to_char('%', l:start_lnum, l:start_col)
-    let l:end_char = lsp#utils#to_char('%', l:end_lnum, l:end_col)
-    redraw | echo 'Formatting document range ...'
-    call lsp#send_request(l:server, {
-        \ 'method': 'textDocument/rangeFormatting',
-        \ 'params': {
-        \   'textDocument': lsp#get_text_document_identifier(),
-        \   'range': {
-        \       'start': { 'line': l:start_lnum - 1, 'character': l:start_char },
-        \       'end': { 'line': l:end_lnum - 1, 'character': l:end_char },
-        \   },
-        \   'options': {
-        \       'tabSize': getbufvar(bufnr('%'), '&shiftwidth'),
-        \       'insertSpaces': getbufvar(bufnr('%'), '&expandtab') ? v:true : v:false,
-        \   },
-        \ },
-        \ 'sync': a:sync,
-        \ 'on_notification': function('s:handle_text_edit', [l:server, s:last_req_id, 'range format']),
-        \ })
-endfunction
-
-function! lsp#ui#vim#document_range_format_sync() abort
-    return s:document_format_range(1, visualmode())
-endfunction
-
-function! lsp#ui#vim#document_range_format() abort
-    return s:document_format_range(0, visualmode())
-endfunction
-
-function! lsp#ui#vim#document_range_format_opfunc(type) abort
-    return s:document_format_range(1, a:type)
-endfunction
-
-function! lsp#ui#vim#workspace_symbol() abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_workspace_symbol_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-
-    call setqflist([])
+function! lsp#ui#vim#workspace_symbol(query) abort
+    let l:servers = filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_workspace_symbol_provider(v:val)')
+    let l:command_id = lsp#_new_command()
 
     if len(l:servers) == 0
         call s:not_supported('Retrieving workspace symbols')
         return
     endif
 
-    let l:query = input('query>')
+    if !empty(a:query)
+        let l:query = a:query
+    else
+        let l:query = inputdialog('query>', '', "\<ESC>")
+        if l:query ==# "\<ESC>"
+            return
+        endif
+    endif
 
     for l:server in l:servers
         call lsp#send_request(l:server, {
@@ -316,18 +162,17 @@ function! lsp#ui#vim#workspace_symbol() abort
             \ 'params': {
             \   'query': l:query,
             \ },
-            \ 'on_notification': function('s:handle_symbol', [l:server, s:last_req_id, 'workspaceSymbol']),
+            \ 'on_notification': function('s:handle_symbol', [l:server, l:command_id, 'workspaceSymbol']),
             \ })
     endfor
 
+    redraw
     echo 'Retrieving workspace symbols ...'
 endfunction
 
 function! lsp#ui#vim#document_symbol() abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_document_symbol_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-
-    call setqflist([])
+    let l:servers = filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_document_symbol_provider(v:val)')
+    let l:command_id = lsp#_new_command()
 
     if len(l:servers) == 0
         call s:not_supported('Retrieving symbols')
@@ -340,82 +185,15 @@ function! lsp#ui#vim#document_symbol() abort
             \ 'params': {
             \   'textDocument': lsp#get_text_document_identifier(),
             \ },
-            \ 'on_notification': function('s:handle_symbol', [l:server, s:last_req_id, 'documentSymbol']),
+            \ 'on_notification': function('s:handle_symbol', [l:server, l:command_id, 'documentSymbol']),
             \ })
     endfor
 
     echo 'Retrieving document symbols ...'
 endfunction
 
-" Returns currently selected range. If nothing is selected, returns empty
-" dictionary.
-"
-" @returns
-"   Range - https://microsoft.github.io/language-server-protocol/specification#range
-function! s:get_visual_selection_range() abort
-    " TODO: unify this method with s:get_visual_selection_pos()
-    let [l:line_start, l:column_start] = getpos("'<")[1:2]
-    let [l:line_end, l:column_end] = getpos("'>")[1:2]
-    call lsp#log([l:line_start, l:column_start, l:line_end, l:column_end])
-    if l:line_start == 0
-        return {}
-    endif
-    " For line selection, column_end is a very large number, so trim it to
-    " number of characters in this line.
-    if l:column_end - 1 > len(getline(l:line_end))
-      let l:column_end = len(getline(l:line_end)) + 1
-    endif
-    let l:char_start = lsp#utils#to_char('%', l:line_start, l:column_start)
-    let l:char_end = lsp#utils#to_char('%', l:line_end, l:column_end)
-    return {
-          \ 'start': { 'line': l:line_start - 1, 'character': l:char_start },
-          \ 'end': { 'line': l:line_end - 1, 'character': l:char_end },
-          \}
-endfunction
-
-" https://microsoft.github.io/language-server-protocol/specification#textDocument_codeAction
-function! lsp#ui#vim#code_action() abort
-    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_code_action_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-    let l:diagnostic = lsp#ui#vim#diagnostics#get_diagnostics_under_cursor()
-
-    if len(l:servers) == 0
-        call s:not_supported('Code action')
-        return
-    endif
-
-    let l:range = s:get_visual_selection_range()
-    if empty(l:range)
-        if empty(l:diagnostic)
-            echo 'No diagnostics found under the cursors'
-            return
-        else
-            let l:range = l:diagnostic['range']
-            let l:diagnostics = [l:diagnostic]
-        end
-    else
-        let l:diagnostics = []
-    endif
-
-    for l:server in l:servers
-        call lsp#send_request(l:server, {
-            \ 'method': 'textDocument/codeAction',
-            \ 'params': {
-            \   'textDocument': lsp#get_text_document_identifier(),
-            \   'range': l:range,
-            \   'context': {
-            \       'diagnostics' : l:diagnostics,
-            \   },
-            \ },
-            \ 'on_notification': function('s:handle_code_action', [l:server, s:last_req_id, 'codeAction']),
-            \ })
-    endfor
-
-    echo 'Retrieving code actions ...'
-endfunction
-
-function! s:handle_symbol(server, last_req_id, type, data) abort
-    if a:last_req_id != s:last_req_id
+function! s:handle_symbol(server, last_command_id, type, data) abort
+    if a:last_command_id != lsp#_last_command()
         return
     endif
 
@@ -426,7 +204,13 @@ function! s:handle_symbol(server, last_req_id, type, data) abort
 
     let l:list = lsp#ui#vim#utils#symbols_to_loc_list(a:server, a:data)
 
-    call setqflist(l:list)
+    if has('patch-8.2.2147')
+      call setqflist(l:list)
+      call setqflist([], 'a', {'title': a:type})
+    else
+      call setqflist([])
+      call setqflist(l:list)
+    endif
 
     if empty(l:list)
         call lsp#utils#error('No ' . a:type .' found')
@@ -436,94 +220,58 @@ function! s:handle_symbol(server, last_req_id, type, data) abort
     endif
 endfunction
 
-function! s:update_tagstack() abort
-    let l:bufnr = bufnr('%')
-    let l:item = {'bufnr': l:bufnr, 'from': [l:bufnr, line('.'), col('.'), 0], 'tagname': expand('<cword>')}
-    let l:winid = win_getid()
-
-    let l:stack = gettagstack(l:winid)
-    if l:stack['length'] == l:stack['curidx']
-        " Replace the last items with item.
-        let l:action = 'r'
-        let l:stack['items'][l:stack['curidx']-1] = l:item
-    elseif l:stack['length'] > l:stack['curidx']
-        " Replace items after used items with item.
-        let l:action = 'r'
-        if l:stack['curidx'] > 1
-            let l:stack['items'] = add(l:stack['items'][:l:stack['curidx']-2], l:item)
-        else
-            let l:stack['items'] = [l:item]
-        endif
-    else
-        " Append item.
-        let l:action = 'a'
-        let l:stack['items'] = [l:item]
-    endif
-    let l:stack['curidx'] += 1
-
-    call settagstack(l:winid, l:stack, l:action)
-endfunction
-
-function! s:handle_location(ctx, server, type, data) abort "ctx = {counter, list, jump_if_one, last_req_id, in_preview}
-    if a:ctx['last_req_id'] != s:last_req_id
+function! s:handle_location(ctx, server, type, data) abort "ctx = {counter, list, last_command_id, jump_if_one, mods, in_preview}
+    if a:ctx['last_command_id'] != lsp#_last_command()
         return
     endif
 
     let a:ctx['counter'] = a:ctx['counter'] - 1
 
-    if lsp#client#is_error(a:data['response'])
+    if lsp#client#is_error(a:data['response']) || !has_key(a:data['response'], 'result')
         call lsp#utils#error('Failed to retrieve '. a:type . ' for ' . a:server . ': ' . lsp#client#error_message(a:data['response']))
     else
-        let a:ctx['list'] = a:ctx['list'] + lsp#ui#vim#utils#locations_to_loc_list(a:data)
+        let a:ctx['list'] = a:ctx['list'] + lsp#utils#location#_lsp_to_vim_list(a:data['response']['result'])
     endif
 
     if a:ctx['counter'] == 0
         if empty(a:ctx['list'])
             call lsp#utils#error('No ' . a:type .' found')
         else
-            if exists('*gettagstack') && exists('*settagstack')
-                call s:update_tagstack()
-            endif
+            call lsp#utils#tagstack#_update()
 
             let l:loc = a:ctx['list'][0]
 
             if len(a:ctx['list']) == 1 && a:ctx['jump_if_one'] && !a:ctx['in_preview']
-                normal! m'
-                let l:buffer = bufnr(l:loc['filename'])
-                if &modified && !&hidden
-                    let l:cmd = l:buffer !=# -1 ? 'sb ' . l:buffer : 'split ' . fnameescape(l:loc['filename'])
-                else
-                    let l:cmd = l:buffer !=# -1 ? 'b ' . l:buffer : 'edit ' . fnameescape(l:loc['filename'])
-                endif
-                execute l:cmd . ' | call cursor('.l:loc['lnum'].','.l:loc['col'].')'
+                call lsp#utils#location#_open_vim_list_item(l:loc, a:ctx['mods'])
                 echo 'Retrieved ' . a:type
                 redraw
             elseif !a:ctx['in_preview']
+                call setqflist([])
                 call setqflist(a:ctx['list'])
                 echo 'Retrieved ' . a:type
                 botright copen
             else
-                let l:lines = readfile(fnameescape(l:loc['filename']))
+                let l:lines = readfile(l:loc['filename'])
                 if has_key(l:loc,'viewstart') " showing a locationLink
                     let l:view = l:lines[l:loc['viewstart'] : l:loc['viewend']]
                     call lsp#ui#vim#output#preview(a:server, l:view, {
-                                \   'statusline': ' LSP Peek ' . a:type,
-                                \   'filetype': &filetype
-                                \ })
+                        \   'statusline': ' LSP Peek ' . a:type,
+                        \   'filetype': &filetype
+                        \ })
                 else " showing a location
                     call lsp#ui#vim#output#preview(a:server, l:lines, {
-                                \   'statusline': ' LSP Peek ' . a:type,
-                                \   'cursor': { 'line': l:loc['lnum'], 'col': l:loc['col'], 'align': g:lsp_peek_alignment },
-                                \   'filetype': &filetype
-                                \ })
+                        \   'statusline': ' LSP Peek ' . a:type,
+                        \   'cursor': { 'line': l:loc['lnum'], 'col': l:loc['col'], 'align': g:lsp_peek_alignment },
+                        \   'filetype': &filetype
+                        \ })
                 endif
             endif
         endif
     endif
 endfunction
 
-function! s:handle_rename_prepare(server, last_req_id, type, data) abort
-    if a:last_req_id != s:last_req_id
+function! s:handle_rename_prepare(server, last_command_id, type, cword, position, data) abort
+    if a:last_command_id != lsp#_last_command()
         return
     endif
 
@@ -531,15 +279,31 @@ function! s:handle_rename_prepare(server, last_req_id, type, data) abort
         call lsp#utils#error('Failed to retrieve '. a:type . ' for ' . a:server . ': ' . lsp#client#error_message(a:data['response']))
         return
     endif
+    let l:result = a:data['response']['result']
 
-    let l:range = a:data['response']['result']
+    " Check response: null.
+    if empty(l:result)
+        echo 'The ' . a:server . ' returns for ' . a:type . ' (The rename request may be invalid at the given position).'
+        return
+    endif
+
+    " Check response: { defaultBehavior: boolean }.
+    if has_key(l:result, 'defaultBehavior')
+        call timer_start(1, {x->s:rename(a:server, input('new name: ', a:cword), a:position)})
+        return
+    endif
+
+    " Check response: { placeholder: string }
+    if has_key(l:result, 'placeholder') && !empty(l:result['placeholder'])
+        call timer_start(1, {x->s:rename(a:server, input('new name: ', a:cword), a:position)})
+        return
+    endif
+
+    " Check response: { range: Range } | Range
+    let l:range = get(l:result, 'range', l:result)
     let l:lines = getline(1, '$')
-    let l:start_line = l:range['start']['line'] + 1
-    let l:start_char = l:range['start']['character']
-    let l:start_col = lsp#utils#to_col('%', l:start_line, l:start_char)
-    let l:end_line = l:range['end']['line'] + 1
-    let l:end_char = l:range['end']['character']
-    let l:end_col = lsp#utils#to_col('%', l:end_line, l:end_char)
+    let [l:start_line, l:start_col] = lsp#utils#position#lsp_to_vim('%', l:range['start'])
+    let [l:end_line, l:end_col] = lsp#utils#position#lsp_to_vim('%', l:range['end'])
     if l:start_line ==# l:end_line
         let l:name = l:lines[l:start_line - 1][l:start_col - 1 : l:end_col - 2]
     else
@@ -557,8 +321,8 @@ function! s:handle_rename_prepare(server, last_req_id, type, data) abort
     call timer_start(1, {x->s:rename(a:server, input('new name: ', l:name), l:range['start'])})
 endfunction
 
-function! s:handle_workspace_edit(server, last_req_id, type, data) abort
-    if a:last_req_id != s:last_req_id
+function! s:handle_workspace_edit(server, last_command_id, type, data) abort
+    if a:last_command_id != lsp#_last_command()
         return
     endif
 
@@ -572,8 +336,8 @@ function! s:handle_workspace_edit(server, last_req_id, type, data) abort
     echo 'Renamed'
 endfunction
 
-function! s:handle_text_edit(server, last_req_id, type, data) abort
-    if a:last_req_id != s:last_req_id
+function! s:handle_text_edit(server, last_command_id, type, data) abort
+    if a:last_command_id != lsp#_last_command()
         return
     endif
 
@@ -587,68 +351,147 @@ function! s:handle_text_edit(server, last_req_id, type, data) abort
     redraw | echo 'Document formatted'
 endfunction
 
-function! s:handle_code_action(server, last_req_id, type, data) abort
-    if lsp#client#is_error(a:data['response'])
-        call lsp#utils#error('Failed to '. a:type . ' for ' . a:server . ': ' . lsp#client#error_message(a:data['response']))
-        return
-    endif
-
-    let l:codeActions = a:data['response']['result']
-
-    let l:index = 0
-    let l:choices = []
-
-    call lsp#log('s:handle_code_action', l:codeActions)
-
-    if len(l:codeActions) == 0
-        echo 'No code actions found'
-        return
-    endif
-
-    while l:index < len(l:codeActions)
-        call add(l:choices, string(l:index + 1) . ' - ' . l:codeActions[index]['title'])
-
-        let l:index += 1
-    endwhile
-
-    let l:choice = inputlist(l:choices)
-
-    if l:choice > 0 && l:choice <= l:index
-        call s:execute_command_or_code_action(a:server, l:codeActions[l:choice - 1])
-    endif
+function! lsp#ui#vim#code_action(opts) abort
+    call lsp#ui#vim#code_action#do(extend({
+        \   'sync': v:false,
+        \   'selection': v:false,
+        \   'query': '',
+        \ }, a:opts))
 endfunction
 
-" @params
-"   server - string
-"   comand_or_code_action - Command | CodeAction
-function! s:execute_command_or_code_action(server, command_or_code_action) abort
-    if has_key(a:command_or_code_action, 'command') && type(a:command_or_code_action['command']) == type('')
-        let l:command = a:command_or_code_action
-        call s:execute_command(a:server, l:command)
-    else
-        let l:code_action = a:command_or_code_action
-        if has_key(l:code_action, 'edit')
-            call lsp#utils#workspace_edit#apply_workspace_edit(a:command_or_code_action['edit'])
-        endif
-        if has_key(l:code_action, 'command')
-            call s:execute_command(a:server, l:code_action['command'])
-        endif
-    endif
-endfunction
-
-" Sends workspace/executeCommand with given command.
-" @params
-"   server - string
-"   command - https://microsoft.github.io/language-server-protocol/specification#command
-function! s:execute_command(server, command) abort
-    let l:params = {'command': a:command['command']}
-    if has_key(a:command, 'arguments')
-        let l:params['arguments'] = a:command['arguments']
-    endif
-    call lsp#send_request(a:server, {
-        \ 'method': 'workspace/executeCommand',
-        \ 'params': l:params,
+function! lsp#ui#vim#code_lens() abort
+    call lsp#ui#vim#code_lens#do({
+        \   'sync': v:false,
         \ })
 endfunction
 
+function! lsp#ui#vim#add_tree_call_hierarchy_incoming() abort
+    let l:ctx = { 'add_tree': v:true }
+    call lsp#ui#vim#call_hierarchy_incoming(l:ctx)
+endfunction
 
+function! lsp#ui#vim#call_hierarchy_incoming(ctx) abort
+    let l:ctx = extend({ 'method': 'incomingCalls', 'key': 'from' }, a:ctx)
+    call s:prepare_call_hierarchy(l:ctx)
+endfunction
+
+function! lsp#ui#vim#call_hierarchy_outgoing() abort
+    let l:ctx = { 'method': 'outgoingCalls', 'key': 'to' }
+    call s:prepare_call_hierarchy(l:ctx)
+endfunction
+
+function! s:prepare_call_hierarchy(ctx) abort
+    let l:servers = filter(lsp#get_allowed_servers(), 'lsp#capabilities#has_call_hierarchy_provider(v:val)')
+    let l:command_id = lsp#_new_command()
+
+    let l:ctx = extend({ 'counter': len(l:servers), 'list':[], 'last_command_id': l:command_id }, a:ctx)
+    if len(l:servers) == 0
+        call s:not_supported('Retrieving call hierarchy')
+        return
+    endif
+
+    for l:server in l:servers
+        call lsp#send_request(l:server, {
+            \ 'method': 'textDocument/prepareCallHierarchy',
+            \ 'params': {
+            \   'textDocument': lsp#get_text_document_identifier(),
+            \   'position': lsp#get_position(),
+            \ },
+            \ 'on_notification': function('s:handle_prepare_call_hierarchy', [l:ctx, l:server, 'prepare_call_hierarchy']),
+            \ })
+    endfor
+
+    echo 'Preparing call hierarchy ...'
+endfunction
+
+function! s:handle_prepare_call_hierarchy(ctx, server, type, data) abort
+    if a:ctx['last_command_id'] != lsp#_last_command()
+        return
+    endif
+
+    if lsp#client#is_error(a:data['response']) || !has_key(a:data['response'], 'result')
+        call lsp#utils#error('Failed to '. a:type . ' for ' . a:server . ': ' . lsp#client#error_message(a:data['response']))
+        return
+    endif
+    if empty(a:data['response']['result'])
+        call lsp#utils#warning('Failed to '. a:type . ' for ' . a:server . ': ' . lsp#client#error_message(a:data['response']))
+        return
+    endif
+
+    for l:item in a:data['response']['result']
+        call s:call_hierarchy(a:ctx, a:server, l:item)
+    endfor
+endfunction
+
+function! s:call_hierarchy(ctx, server, item) abort
+    call lsp#send_request(a:server, {
+        \ 'method': 'callHierarchy/' . a:ctx['method'],
+        \ 'params': {
+        \   'item': a:item,
+        \ },
+        \ 'on_notification': function('s:handle_call_hierarchy', [a:ctx, a:server, 'call_hierarchy']),
+        \ })
+endfunction
+
+function! s:handle_call_hierarchy(ctx, server, type, data) abort
+    if a:ctx['last_command_id'] != lsp#_last_command()
+        return
+    endif
+
+    let a:ctx['counter'] = a:ctx['counter'] - 1
+
+    if lsp#client#is_error(a:data['response']) || !has_key(a:data['response'], 'result')
+        call lsp#utils#error('Failed to retrieve '. a:type . ' for ' . a:server . ': ' . lsp#client#error_message(a:data['response']))
+    elseif a:data['response']['result'] isnot v:null
+        for l:item in a:data['response']['result']
+            let l:loc = s:hierarchy_item_to_vim(l:item[a:ctx['key']], a:server)
+            if l:loc isnot v:null
+                let a:ctx['list'] += [l:loc]
+            endif
+        endfor
+    endif
+
+    if a:ctx['counter'] == 0
+        if empty(a:ctx['list'])
+            call lsp#utils#error('No ' . a:type .' found')
+        else
+            call lsp#utils#tagstack#_update()
+            if get(a:ctx, 'add_tree', v:false)
+                let l:qf = getqflist({'idx' : 0, 'items': []})
+                let l:pos = l:qf.idx
+                let l:parent = l:qf.items
+                let l:level = count(l:parent[l:pos-1].text, g:lsp_tree_incoming_prefix)
+                let a:ctx['list'] = extend(l:parent, map(a:ctx['list'], 'extend(v:val, {"text": repeat("' . g:lsp_tree_incoming_prefix . '", l:level+1) . v:val.text})'), l:pos)
+            endif
+            call setqflist([])
+            call setqflist(a:ctx['list'])
+            echo 'Retrieved ' . a:type
+            botright copen
+            if get(a:ctx, 'add_tree', v:false)
+                " move the cursor to the newly added item
+                execute l:pos + 1
+            endif
+        endif
+    endif
+endfunction
+
+function! s:hierarchy_item_to_vim(item, server) abort
+    let l:uri = a:item['uri']
+    if !lsp#utils#is_file_uri(l:uri)
+        return v:null
+    endif
+
+    let l:path = lsp#utils#uri_to_path(l:uri)
+    let [l:line, l:col] = lsp#utils#position#lsp_to_vim(l:path, a:item['range']['start'])
+    let l:text = '[' . lsp#ui#vim#utils#_get_symbol_text_from_kind(a:server, a:item['kind']) . '] ' . a:item['name']
+    if has_key(a:item, 'detail')
+        let l:text .= ": " . a:item['detail']
+    endif
+
+    return {
+        \ 'filename': l:path,
+        \ 'lnum': l:line,
+        \ 'col': l:col,
+        \ 'text': l:text,
+        \ }
+endfunction
